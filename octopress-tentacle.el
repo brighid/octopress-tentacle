@@ -205,7 +205,7 @@ is not optional because we assume that the caller cares about the output."
           (rake-command-suffix "'")
           (ruby-version (octopress-ruby-version-is blog-name)))
       (when octopress-clobber-existing-posts
-        (concat "yes | " rake-command-prefix))
+        (concat "yes | " rake-format-string))
       ;; TODO: Fail more gracefully when clobber-existing is nil.
       (cond
        ((octopress-ruby-kind-is blog-name "rbenv")
