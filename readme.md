@@ -23,6 +23,16 @@ deals with Octopress in these ways:
   notes when it falls over, and uses the Customize facility to make life
   easier for the user.
 
+### How to use it ###
+
+* Put `octopress-tentacle.el` in a folder in your load-path and eval `(require
+  'octopress-tentacle)`.
+* Customize `octopress-blog-registry` or the group `octopress` and add
+  information about the name and path of your Octopress blog(s). The other
+  fields in `octopress-blog-registry` are not required - the package will
+  figure them out on its own if you leave them blank.
+* Invoke `M-x octopress-make-new-post` to create a new blog post.
+
 #### Issues: ####
 * I could declare a dependency on markdown-mode, but choose not to because
   editing Markdown content in text-mode is simple. Similarly, there are some
