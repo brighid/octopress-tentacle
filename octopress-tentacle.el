@@ -26,6 +26,7 @@
 
 ;;; Change Log:
 ;; * 0.1-3: create defcustoms, rake-applying defuns, & octopress-make-new-post
+;; * 0.4: better defcustom, non-broken with-blog-settings macro
 
 ;;; Commentary:
 ;; This chunk of elisp exists because, in classic engineer fashion, I didn't
@@ -52,7 +53,7 @@
 ;; * Currently I have no idea whether this works on emacs in a Windows
 ;;   environment, I would be happy to hear from ntemacs users on that point.
 ;; * Requires some customization - you have to enter a blog name and a path for
-;;   `octopress-blog-paths', otherwise things won't function. Once a blog exists,
+;;   `octopress-blog-registry', otherwise things won't function. Once a blog exists,
 ;;   the module will do its best to accomodate you and not make you customize
 ;;   further. It's infeasible to automatically locate Octopress installs or I'd
 ;;   try doing that.
@@ -62,46 +63,58 @@
 (defconst octopress-tentacle-version "0.3"
   "Version of the octopress-tentacle module.")
 
-(defcustom octopress-blog-paths `(("my_blog" .
-                              ,(concat (file-name-as-directory (getenv "HOME")) "blog")))
-  "An alist of Octopress blogs and their paths.
-Each local blog has a name that other Octopress-related functions will use to
-refer to it. The default is provided both as an example and because more users
-are likely to have the local copy of their Octopress blog at ~/blog than
-anywhere else. The path to the blog should be the path to the directory that
-holds _config.yml, config.rb, Rakefile, etc.
+(defgroup octopress nil
+  "Octopress functions and tools."
+  :prefix "octopress-"
+  :group 'external
+  ;; Using 'external' group because much of this is dedicated to interacting
+  ;; with external Ruby tools.
+  )
 
-Elements are structured as ( NAME . PATH ).
-  NAME is the short name of the blog, a string.
-  PATH is the location of the blog's files - the directory must already exist."
-
-  :type '(alist :key-type (string :tag "Blog name (keep it short)")
-                :value-type (directory :tag "Path to blog's local files"))
-  :risky nil
-  :group 'octopress
-)
-
-;; It's possible that we'll want a defcustom that controls the
-;; fallback-to-default-blog behavior. Let's not implement that until what we
-;; already are attempting, is working.
-
-(defcustom octopress-blog-authors `(("my_blog" . ,(user-full-name)))
-  "An alist of Octopress blogs and default authors for each.
-Each blog has a default author associated with it that will be added to new
-posts to that blog. This feature is meant for users who maintain more than one
-Octopress blog, for users who incorporate posts from others (e.g. submissions)
-into their own blog, or for users who maintain 'in-character' fiction-centric
-blogs that use a conceit of multiple authorship.
-
-Elements are structured as ( BLOG . NAME ).
-  BLOG is the short name of the blog, a string.
-  NAME is the author name to use for the given blog, as a string."
-
-  :type '(alist :key-type (string :tag "Blog name (must match a name in octopress-blog-paths)")
-                :value-type (string :tag "Default author name to use for the given blog"))
-  :risky nil
-  :group 'octopress
-)
+(defcustom octopress-blog-registry
+  `(("my_blog"
+     (blog-path . ,(concat (file-name-as-directory (getenv "HOME")) "blog"))
+     (default-author . ,(user-full-name))
+     (ruby-kind . "")
+     (ruby-version . "")))
+  "An alist of known blogs and metadata about them.
+This structure tells octopress-tentacle that blogs exist and holds data that
+makes dealing with them easier. It is a compound alist whose car, NAME, is the
+name that octopress-tentacle will use to find a blog and whose cdr contains
+information about the blog that octopress-tentacle needs. Only NAME and
+BLOG-PATH are necessary: DEFAULT-AUTHOR is optional, while RUBY-KIND and
+RUBY-VERSION contain data that octopress-tentacle will find by itself if they
+are not filled in.
+  * BLOG-PATH: Location of the blog's root folder - the directory that holds
+               Octopress' _config.yml, config.rb, Rakefile, etc.
+  * DEFAULT-AUTHOR: The author name that will be attached to new posts. This
+                    feature is meant for users who maintain more than one
+                    Octopress blog, for users who incorporate posts from others
+                    (e.g. submissions) into their own blog, or for users who
+                    maintain 'in-character' fiction-centric blogs that use a
+                    conceit of multiple authorship.
+  * RUBY-KIND: Whether the given blog executes using a Ruby supplied by
+                 rbenv, by rvm, or by the system.
+  * RUBY-VERSION: The version of Ruby that this blog uses to run Octopress.
+"
+  :type '(alist
+          :tag "Octopress blogs"
+          :key-type (string :tag "Name")
+          :value-type (list :tag "Properties"
+            :extra-offset 4
+            (cons :format "%v"
+                  (const :format "" blog-path)
+                  (directory :tag "Path to blog files"))
+            (cons :format "%v"
+                  (const :format "" default-author)
+                  (string :tag "Default author for new posts"))
+            (cons :format "%v"
+                  (const :format "" ruby-kind)
+                  (string :tag "Type of Ruby to use"))
+            (cons :format "%v"
+                  (const :format "" ruby-version)
+                  (string :tag "Version of Ruby to use"))))
+  :group 'octopress)
 
 (defcustom octopress-clobber-existing-posts nil
   "Whether to overwrite existing posts when there are collisions.
@@ -113,38 +126,74 @@ file. Otherwise the existing file gets clobbered."
 
 ;; FUTURE: Add a couple of hooks - e.g. after-create-new-post,
 ;; after-create-new-page, after-generate (allows auto-deploy!), things like
-;; that to make it easier to tweak this stuff.
+;; that to make it easier to tweak this stuff. It's also possible that we'll
+;; want a defcustom that controls the fallback-to-default-blog behavior. Let's
+;; not implement that until what we already are attempting, is working.
 
 (defun octopress-blog-name-or-default (blog-name)
   "Returns the default blog unless BLOG-NAME is a known blog.
-If the given argument is not in `octopress-blog-paths', this function returns
-the default blog (i.e. the first in the list), otherwise it returns BLOG-NAME."
-  (if (assoc blog-name octopress-blog-paths)
-      blog-name
-    (message "Couldn't find a saved blog with the given name, falling back on the default blog.")
-    (caar octopress-blog-paths)))
+Returns BLOG-NAME unless BLOG-NAME is not in `octopress-blog-registry', in
+which case it returns a string that is the name of the default blog (i.e. the
+first blog in `octopress-blog-registry')."
+  (if (assoc blog-name octopress-blog-registry)
+      (identity blog-name)
+      (message (concat
+                "Couldn't find a blog named '"
+                (pp-to-string blog-name)
+                "', falling back on default blog '"
+                (caar octopress-blog-registry)
+                "'."))
+      (caar octopress-blog-registry)))
 
-(defun octopress-blog-author-or-default (blog-name)
+(defun octopress-blog-default-author (blog-name)
   "Returns the default author for BLOG-NAME if there is one."
-  (let ((blog-name (octopress-blog-name-or-default blog-name))
-        (author-exists (assoc blog-name octopress-blog-authors)))
-    ;; TODO: Figure out how to indicate author fallback, parallel to how we
-    ;; message about blog-name fallback.
-    (when author-exists
-      (cdr author-exists))))
+  (setq listed-author
+        (cdr (assoc 'default-author
+               (assoc blog-name octopress-blog-registry))))
+  (unless (or (string-equal "" listed-author) (not listed-author)) listed-author))
 
-(defmacro octopress-with-defaults (blog-name &optional author &rest body)
+(defun octopress-blog-has-no-setting (blog-name data-kind)
+  "Returns t if blog BLOG-NAME lacks a setting for DATA-KIND."
+  (let ((blog-data (assoc blog-name octopress-blog-registry)))
+    (when (or
+         (not (assoc data-kind blog-data))
+         (string-equal "" (cdr (assoc data-kind blog-data))))
+      t)))
+
+(defmacro octopress-with-blog-settings (blog-name &optional author &rest body)
   "Enables falling back to default blog, author, etc.
 Designed to eliminate boilerplate from functions that repeatedly needed to
-check whether a blog exists in `octopress-blog-paths' and to get subsquent data
-from there: this makes the whole shebang available and wraps BODY in a
-let-block."
-  (setq blog-name (octopress-blog-name-or-default blog-name))
-  (setq author (if (not author) (octopress-blog-author-or-default blog-name) author))
-  `(let ((blog-name ,blog-name)
-        (author ,author)
-        (blog-path ,(file-name-as-directory (cdr (assoc blog-name octopress-blog-paths))))
-        (home-path ,(getenv "HOME")))
+check whether a blog exists in `octopress-blog-registry' and to get subsquent
+data from there: this macro grabs the relevant data and makes it available in
+the local by wrapping BODY in a let-block."
+  `(let ((blog-name
+          (octopress-blog-name-or-default ,blog-name))
+         (author
+          (if (not ,author)
+              (octopress-blog-default-author
+               (octopress-blog-name-or-default ,blog-name))
+            author))
+         (blog-path
+          (file-name-as-directory
+           (cdr (assoc
+                 'blog-path
+                 (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry))))))
+         (ruby-kind
+          (if (octopress-blog-has-no-setting 'ruby-kind ,blog-name)
+              (octopress-ruby-kind-of-blog blog-name)
+            (cdr (assoc
+                  'ruby-kind
+                  (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry))))))
+         (ruby-version
+          (if (octopress-blog-has-no-setting 'ruby-version ,blog-name)
+              (octopress-ruby-version-of-blog blog-name)
+            (cdr (assoc
+                  'ruby-version
+                  (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry)))))))
+     (message (concat
+               "Set up with data: "
+               (pp-to-string
+                (list blog-name author blog-path ruby-kind ruby-version))))
      ,@body))
 
 (defun octopress-check-ruby-flavor (blog-name)
@@ -161,9 +210,10 @@ break.
 
 Returns a list whose car a string for the kind of ruby found and whose cdr is a
 string for the version number."
-;; FUTURE: turn this into an automatically calculated defcustom. Not yet,
-;; though, because just running a few non-destructive shell commands is cheap.
-  (octopress-with-defaults blog-name nil
+  (setq blog-data
+        (assoc (octopress-blog-name-or-default blog-name) octopress-blog-registry))
+  (let ((blog-name (car blog-data))
+        (blog-path (file-name-as-directory (cdr (assoc 'blog-path blog-data)))))
     (cond
      ((string-match "set by" (shell-command-to-string "bash -l -c 'rbenv version'")) (setq ruby-kind "rbenv"))
      ((string-match "ruby" (shell-command-to-string "rvm info")) (setq ruby-kind "rvm"))
@@ -171,50 +221,55 @@ string for the version number."
      (t (error "Can't find a local Ruby to run")))
     (cond
      ((string-equal ruby-kind "rbenv")
-      (setq ruby-version (shell-command-to-string (concat "cat " (file-name-as-directory blog-path) ".rbenv-version"))))
+      (setq ruby-version (shell-command-to-string (concat "cat " blog-path ".rbenv-version"))))
      ((string-equal ruby-kind "rvm")
-      (setq ruby-version (replace-regexp-in-string "rvm use " "" (shell-command-to-string (concat "cat " (file-name-as-directory blog-path) ".rvmrc")))))
+      (setq ruby-version (replace-regexp-in-string "rvm use " "" (shell-command-to-string (concat "cat " blog-path ".rvmrc")))))
      ((string-equal ruby-kind "system")
       (setq ruby-version (replace-regexp-in-string "ruby \\([123]\\.[0-9][^\\[\\[()]+\\) .+" "\\1" (shell-command-to-string "ruby --version")))))
     ;; Remove the trailing newline that comes with shell commands.
     (setq ruby-version (replace-regexp-in-string "\\(.+\\)[\n]$" "\\1" ruby-version))
-    (message (concat "Using kind: '" ruby-kind "' and version: " ruby-version " for task."))
+    ;; (message (concat "Using kind: '" ruby-kind "' and version: '" ruby-version "' for blog: " blog-name))
     (list ruby-kind ruby-version)))
 
-(defun octopress-ruby-kind-is (blog-name ruby-kind)
-  "Returns t if BLOG-NAME's ruby flavor is RUBY-KIND."
-  (if (string-equal (car (octopress-check-ruby-flavor blog-name)) ruby-kind)
-      ruby-kind
-    nil))
+;; FUTURE: Add a conditional to pull these values from defcustom if they're
+;; present, and to poke them into `octopress-blog-registry' if not. Not yet,
+;; though, because just running a few non-destructive shell commands is cheap.
+(defun octopress-is-ruby-kind (blog-name ruby-kind)
+  "Returns t if BLOG-NAME's ruby kind is RUBY-KIND."
+  (when
+      (string-equal (octopress-ruby-kind-of-blog blog-name) ruby-kind)
+      ruby-kind))
 
-(defun octopress-ruby-version-is (blog-name)
+(defun octopress-ruby-kind-of-blog (blog-name)
   "Returns a string holding the version number of BLOG-NAME's Ruby."
-  (cdr (octopress-check-ruby-flavor blog-name)))
+  (elt (octopress-check-ruby-flavor blog-name) 0))
 
-(defun octopress-rake-task (blog-name task output-buffer)
+(defun octopress-ruby-version-of-blog (blog-name)
+  "Returns a string holding the version number of BLOG-NAME's Ruby."
+  (elt (octopress-check-ruby-flavor blog-name) 1))
+
+(defun octopress-rake-task (task blog-name blog-path output-buffer)
   "Run a rake command for the given blog.
 This function changes the current directory to the path for BLOG-NAME and then
 uses rake to execute TASK in that environment, doing its best to respect the
 constraints imposed by rbenv/rvm. Output will be sent to OUTPUT-BUFFER, which
 is not optional because we assume that the caller cares about the output."
-  (octopress-with-defaults blog-name nil
     (cd blog-path)
-    ;; `blog-path' provided by `octopress-with-defaults'
     (let ((rake-format-string "rake %s")
           (rake-command-prefix "bash -l -c '")
           (rake-command-suffix "'")
-          (ruby-version (octopress-ruby-version-is blog-name)))
+          (ruby-version (octopress-ruby-version-of-blog blog-name)))
       (when octopress-clobber-existing-posts
         (concat "yes | " rake-format-string))
       ;; TODO: Fail more gracefully when clobber-existing is nil.
       (cond
-       ((octopress-ruby-kind-is blog-name "rbenv")
+       ((octopress-is-ruby-kind blog-name "rbenv")
         (setq rake-format-string
               (concat "eval \"$(rbenv init -)\" && rbenv local "
                       ruby-version
                       " && "
                       rake-format-string)))
-       ((octopress-ruby-kind-is blog-name "rvm")
+       ((octopress-is-ruby-kind blog-name "rvm")
         (setq rake-format-string
               (concat "rvm use " ruby-version " && " rake-format-string)))
               ;; This should make rvm happy.
@@ -225,16 +280,16 @@ is not optional because we assume that the caller cares about the output."
                rake-command-suffix)
        output-buffer  ;; send both stdout and
        output-buffer) ;; stderr to our working buffer.
-      )))
+      ))
 
 (defun octopress-make-new-post (post-title &optional blog-name author)
   "Create a new OctoPress blog post, prompting user for a title.
 Used interactively, creates a new post for the first blog in the
-`octopress-blog-paths' alist with the Author field filled in based on the
-corresponding `octopress-blog-authors' entry, if any.
+`octopress-blog-registry' alist with the Author field filled in based on the
+corresponding default-author value, if any.
 
 Used programmatically, creates a post for the BLOG-NAME blog if BLOG-NAME is
-given and exists in `octopress-blog-paths' or for the default blog if BLOG-NAME
+given and exists in `octopress-blog-registry' or for the default blog if BLOG-NAME
 is omitted. If AUTHOR is provided, its value is used for the post, if not, the
 default name is used.
 
@@ -243,17 +298,21 @@ current window, the file that represents the new blog post. Because it is
 designed to be invoked when you want to write a blog post right this moment, it
 does not use `save-window-excursion' or similar."
 
-  (interactive "MPost title: ")
-  (octopress-with-defaults blog-name author
-    (when (region-active-p)
-      ;; if we've got an active region, base new post on its contents.
+  (interactive "MPost title: \ni\ni")
+  (message (concat
+            "Using blog '" (pp-to-string blog-name)
+            "' and author '" (pp-to-string author) "'."))
+  (if (region-active-p)
+      ;; if we've got an active region, base the new post on its contents.
       (let ((p1 (region-beginning))
             (p2 (region-end)))
-      (setq new-post-blockquote
-            (concat "<blockquote>" (buffer-substring-no-properties p1 p2) "</blockquote>"))))
+        (setq new-post-blockquote
+              (concat "\n<blockquote>\n" (buffer-substring-no-properties p1 p2) "\n</blockquote>\n")))
+        (setq new-post-blockquote nil))
+  (octopress-with-blog-settings blog-name author
     (setq working-buffer (generate-new-buffer "*Octopress New Post*"))
     (switch-to-buffer working-buffer)
-    (octopress-rake-task blog-name (format "new_post[\"%s\"]" post-title) working-buffer)
+    (octopress-rake-task (format "new_post[\"%s\"]" post-title) blog-name blog-path working-buffer)
     (goto-char (point-max))
     (setq name-pattern "Creating new post: \\(.+/[0-9\\-]\\{11\\}.+\\.markdown\\)")
     (setq file-name-string
@@ -266,15 +325,20 @@ does not use `save-window-excursion' or similar."
     (unless file-name-string
       (message "Try looking in *Octopress New Post* to see command output.")
       (error "Can't find the file that should have been created"))
-    (find-file (concat (file-name-as-directory blog-path) file-name-string))
+    (find-file (concat blog-path file-name-string))
     (when (and (boundp 'new-post-blockquote) new-post-blockquote)
       (goto-char (point-max))
-      (insert new-post-blockquote))))
+      (insert new-post-blockquote))
+    (when author
+      (goto-char (point-min))
+      (re-search-forward (concat "date: " (substring (buffer-name) 0 11)) (point-max) t)
+      (move-end-of-line nil)
+      (insert (concat "\nAuthor: " author)))))
 
 (defun octopress-make-new-page (page-title &optional blog-name author)
   "Docstring."
-  (octopress-with-defaults blog-name author
-    (message "Not yet implemented.")))
+  ;; (octopress-with-blog-settings blog-name author
+    (message "Not yet implemented."))
 
 (defun octopress-generate-site (blog-name)
   "Docstring."
