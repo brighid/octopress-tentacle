@@ -298,7 +298,14 @@ current window, the file that represents the new blog post. Because it is
 designed to be invoked when you want to write a blog post right this moment, it
 does not use `save-window-excursion' or similar."
 
-  (interactive "MPost title: \ni\ni")
+  (interactive
+   (let ((post-title (read-string "New post's title: "))
+         (blog-name
+          (if (> (length octopress-blog-registry) 1)
+              (read-string "Use which blog? " nil nil (caar (octopress-blog-registry)))
+            (caar (octopress-blog-registry)))))
+     (list post-title blog-name (octopress-blog-default-author (blog-name)))))
+
   (message (concat
             "Using blog '" (pp-to-string blog-name)
             "' and author '" (pp-to-string author) "'."))
