@@ -195,22 +195,48 @@ string for the version number."
     ;; (message (concat "Using kind: '" ruby-kind "' and version: '" ruby-version "' for blog: " blog-name))
     (list ruby-kind ruby-version)))
 
-;; FUTURE: Add a conditional to pull these values from defcustom if they're
-;; present, and to poke them into `octopress-blog-registry' if not. Not yet,
-;; though, because just running a few non-destructive shell commands is cheap.
 (defun octopress-is-ruby-kind (blog-name ruby-kind)
   "Returns t if BLOG-NAME's ruby kind is RUBY-KIND."
   (when
       (string-equal (octopress-ruby-kind-of-blog blog-name) ruby-kind)
       ruby-kind))
 
+;; TODO: Merge the following two functions in some sensible way.
 (defun octopress-ruby-kind-of-blog (blog-name)
-  "Returns a string holding the version number of BLOG-NAME's Ruby."
-  (elt (octopress-check-ruby-flavor blog-name) 0))
+  "Returns a string holding the kind of BLOG-NAME's Ruby.
+If BLOG-NAME's ruby kind is not listed in `octopress-blog-registry', add it to
+the registry as well as reporting it to the caller."
+  (unless (assoc blog-name octopress-blog-registry)
+    (error "No blog with that name."))
+  (let ((ruby-kind
+         (cdr (assoc 'ruby-kind
+          (cdr (assoc blog-name octopress-blog-registry)))
+          )))
+    (if (or (string-equal "" ruby-kind) (not ruby-kind))
+        (let ((ruby-kind (elt (octopress-check-ruby-flavor blog-name) 0)))
+          (setf
+           (cdr (assoc 'ruby-kind
+                       (cdr (assoc blog-name octopress-blog-registry)))) ruby-kind)
+          (message (concat "Ruby kind not in registry. Set to: " ruby-kind)))
+          ruby-kind)))
 
 (defun octopress-ruby-version-of-blog (blog-name)
-  "Returns a string holding the version number of BLOG-NAME's Ruby."
-  (elt (octopress-check-ruby-flavor blog-name) 1))
+  "Returns a string holding the version number of BLOG-NAME's Ruby.
+If BLOG-NAME's ruby version is not listed in `octopress-blog-registry', add it
+to the registry as well as reporting it to the caller."
+  (unless (assoc blog-name octopress-blog-registry)
+    (error "No blog with that name."))
+  (let ((ruby-version
+         (cdr (assoc 'ruby-version
+          (cdr (assoc blog-name octopress-blog-registry)))
+          )))
+    (if (or (string-equal "" ruby-version) (not ruby-version))
+        (let ((ruby-version (elt (octopress-check-ruby-flavor blog-name) 1)))
+          (setf
+           (cdr (assoc 'ruby-version
+                       (cdr (assoc blog-name octopress-blog-registry)))) ruby-version)
+          (message (concat "Ruby version not in registry. Set to: " ruby-version)))
+          ruby-version)))
 
 (defmacro octopress-with-blog-settings (blog-name &optional author &rest body)
   "Enables falling back to default blog, author, etc.
