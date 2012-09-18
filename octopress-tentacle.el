@@ -160,42 +160,6 @@ first blog in `octopress-blog-registry')."
          (string-equal "" (cdr (assoc data-kind blog-data))))
       t)))
 
-(defmacro octopress-with-blog-settings (blog-name &optional author &rest body)
-  "Enables falling back to default blog, author, etc.
-Designed to eliminate boilerplate from functions that repeatedly needed to
-check whether a blog exists in `octopress-blog-registry' and to get subsquent
-data from there: this macro grabs the relevant data and makes it available in
-the local by wrapping BODY in a let-block."
-  `(let ((blog-name
-          (octopress-blog-name-or-default ,blog-name))
-         (author
-          (if (not ,author)
-              (octopress-blog-default-author
-               (octopress-blog-name-or-default ,blog-name))
-            author))
-         (blog-path
-          (file-name-as-directory
-           (cdr (assoc
-                 'blog-path
-                 (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry))))))
-         (ruby-kind
-          (if (octopress-blog-has-no-setting 'ruby-kind ,blog-name)
-              (octopress-ruby-kind-of-blog blog-name)
-            (cdr (assoc
-                  'ruby-kind
-                  (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry))))))
-         (ruby-version
-          (if (octopress-blog-has-no-setting 'ruby-version ,blog-name)
-              (octopress-ruby-version-of-blog blog-name)
-            (cdr (assoc
-                  'ruby-version
-                  (cdr (assoc (octopress-blog-name-or-default ,blog-name) octopress-blog-registry)))))))
-     (message (concat
-               "Set up with data: "
-               (pp-to-string
-                (list blog-name author blog-path ruby-kind ruby-version))))
-     ,@body))
-
 (defun octopress-check-ruby-flavor (blog-name)
   "Figure out which flavor of Ruby the BLOG-NAME blog is running under.
 By \"flavor\" of Ruby we mean \"combination of version number and
@@ -247,6 +211,35 @@ string for the version number."
 (defun octopress-ruby-version-of-blog (blog-name)
   "Returns a string holding the version number of BLOG-NAME's Ruby."
   (elt (octopress-check-ruby-flavor blog-name) 1))
+
+(defmacro octopress-with-blog-settings (blog-name &optional author &rest body)
+  "Enables falling back to default blog, author, etc.
+Designed to eliminate boilerplate from functions that repeatedly needed to
+check whether a blog exists in `octopress-blog-registry' and to get subsquent
+data from there: this macro grabs the relevant data and makes it available in
+the local by wrapping BODY in a let-block."
+  (let ((blog-name-from-registry
+         (lambda (blog-name)
+           (octopress-blog-name-or-default blog-name)))
+        (get-blog-data
+         (lambda (blog key)
+           (cdr (assoc key (cdr (assoc blog octopress-blog-registry)))))))
+    `(let ((blog-id (funcall ,blog-name-from-registry ,blog-name)))
+       (let ((blog-id blog-id)
+             (author (if (not ,author) (octopress-blog-default-author blog-id) ,author))
+             (blog-path (file-name-as-directory (funcall ,get-blog-data 'blog-path blog-id)))
+             (ruby-kind
+              (if (octopress-blog-has-no-setting 'ruby-kind blog-id)
+                  (octopress-ruby-kind-of-blog blog-id)
+                (funcall ,get-blog-data 'ruby-kind blog-id)))
+             (ruby-version
+              (if (octopress-blog-has-no-setting 'ruby-version blog-id)
+                  (octopress-ruby-version-of-blog blog-id)
+                (funcall ,get-blog-data 'ruby-version blog-id))))
+         (message (concat "Set up with data: "
+                          (pp-to-string
+                           (list blog-id author blog-path ruby-kind ruby-version))))
+     ,@body))))
 
 (defun octopress-rake-task (task blog-name blog-path output-buffer)
   "Run a rake command for the given blog.
