@@ -137,12 +137,10 @@ which case it returns a string that is the name of the default blog (i.e. the
 first blog in `octopress-blog-registry')."
   (if (assoc blog-name octopress-blog-registry)
       (identity blog-name)
-      (message (concat
-                "Couldn't find a blog named '"
-                (pp-to-string blog-name)
-                "', falling back on default blog '"
-                (caar octopress-blog-registry)
-                "'."))
+      (message "Couldn't find a blog named '%s', falling back on default blog '%s'."
+               (pp-to-string blog-name)
+               (caar octopress-blog-registry))
+
       (caar octopress-blog-registry)))
 
 (defun octopress-blog-default-author (blog-name)
@@ -192,7 +190,7 @@ string for the version number."
       (setq ruby-version (replace-regexp-in-string "ruby \\([123]\\.[0-9][^\\[\\[()]+\\) .+" "\\1" (shell-command-to-string "ruby --version")))))
     ;; Remove the trailing newline that comes with shell commands.
     (setq ruby-version (replace-regexp-in-string "\\(.+\\)[\n]$" "\\1" ruby-version))
-    ;; (message (concat "Using kind: '" ruby-kind "' and version: '" ruby-version "' for blog: " blog-name))
+    ;; (message  "Using kind: '%s' and version: '%s' for blog: %s" ruby-kind  ruby-version blog-name))
     (list ruby-kind ruby-version)))
 
 (defun octopress-is-ruby-kind (blog-name ruby-kind)
@@ -217,8 +215,8 @@ the registry as well as reporting it to the caller."
           (setf
            (cdr (assoc 'ruby-kind
                        (cdr (assoc blog-name octopress-blog-registry)))) ruby-kind)
-          (message (concat "Ruby kind not in registry. Set to: " ruby-kind)))
-          ruby-kind)))
+          (message "Ruby kind not in registry. Set to: " ruby-kind)
+          ruby-kind))))
 
 (defun octopress-ruby-version-of-blog (blog-name)
   "Returns a string holding the version number of BLOG-NAME's Ruby.
@@ -231,12 +229,13 @@ to the registry as well as reporting it to the caller."
           (cdr (assoc blog-name octopress-blog-registry)))
           )))
     (if (or (string-equal "" ruby-version) (not ruby-version))
-        (let ((ruby-version (elt (octopress-check-ruby-flavor blog-name) 1)))
+        (let ((ruby-version
+               (elt (octopress-check-ruby-flavor blog-name) 1)))
           (setf
            (cdr (assoc 'ruby-version
                        (cdr (assoc blog-name octopress-blog-registry)))) ruby-version)
-          (message (concat "Ruby version not in registry. Set to: " ruby-version)))
-          ruby-version)))
+          (message "Ruby version not in registry. Set to: %s " ruby-version)
+          ruby-version))))
 
 (defmacro octopress-with-blog-settings (blog-name &optional author &rest body)
   "Enables falling back to default blog, author, etc.
@@ -262,10 +261,10 @@ the local by wrapping BODY in a let-block."
               (if (octopress-blog-has-no-setting 'ruby-version blog-id)
                   (octopress-ruby-version-of-blog blog-id)
                 (funcall ,get-blog-data 'ruby-version blog-id))))
-         (message (concat "Set up with data: "
-                          (pp-to-string
-                           (list blog-id author blog-path ruby-kind ruby-version))))
-     ,@body))))
+         (message "Set up with data: %s"
+                  (pp-to-string
+                   (list blog-id author blog-path ruby-kind ruby-version))))
+     ,@body)))
 
 (defun octopress-rake-task (task blog-name blog-path output-buffer)
   "Run a rake command for the given blog.
@@ -325,9 +324,10 @@ does not use `save-window-excursion' or similar."
             (caar (octopress-blog-registry)))))
      (list post-title blog-name (octopress-blog-default-author (blog-name)))))
 
-  (message (concat
-            "Using blog '" (pp-to-string blog-name)
-            "' and author '" (pp-to-string author) "'."))
+  (message "Creating a post for the '%s'blog by author '%s'."
+           (pp-to-string blog-name)
+           (pp-to-string author))
+
   (if (region-active-p)
       ;; if we've got an active region, base the new post on its contents.
       (let ((p1 (region-beginning))
